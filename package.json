@@ -1,0 +1,76 @@
+{
+  "name": "vibe-kanban-electron",
+  "productName": "Vibe Kanban",
+  "version": "1.0.0",
+  "description": "Electron app for Vibe Kanban",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "generate-icons": "node generate-macos-icon.js"
+  },
+  "keywords": [
+    "electron",
+    "vibe",
+    "kanban"
+  ],
+  "author": "Vibe Kanban Team",
+  "license": "MIT",
+  "homepage": "https://vibekanban.com",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "electron-icon-builder": "^2.0.1",
+    "sharp": "^0.34.4"
+  },
+  "build": {
+    "appId": "com.vibekanban.app",
+    "productName": "Vibe Kanban",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "assets/**/*",
+      "renderer/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.icns",
+      "darkModeSupport": true,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": null,
+      "entitlementsInherit": null
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico",
+      "publisherName": "Vibe Kanban",
+      "verifyUpdateCodeSignature": false
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png",
+      "category": "Development",
+      "maintainer": "Vibe Kanban Team",
+      "synopsis": "Kanban board for managing AI coding agents",
+      "description": "Vibe Kanban is a powerful Kanban board application designed to help you manage and orchestrate AI coding agents efficiently."
+    }
+  }
+}
