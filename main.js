@@ -205,7 +205,10 @@ function createWindow() {
       experimentalFeatures: false
     },
     title: 'Vibe Kanban',
-    show: false // Ne pas afficher immédiatement
+    show: true, // Afficher immédiatement
+    center: true, // Centrer la fenêtre
+    alwaysOnTop: false,
+    skipTaskbar: false
   };
 
   // Ajouter l'icône si elle existe
@@ -285,6 +288,12 @@ function createWindow() {
 
   // Afficher la fenêtre immédiatement pour éviter qu'elle reste cachée
   mainWindow.show();
+
+  // Sur macOS, activer l'application et mettre la fenêtre au premier plan
+  if (process.platform === 'darwin') {
+    app.dock.show();
+    mainWindow.focus();
+  }
 
   // Charger l'URL du serveur Vibe Kanban
   mainWindow.loadURL(SERVER_URL);
