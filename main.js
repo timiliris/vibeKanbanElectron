@@ -283,10 +283,8 @@ function createWindow() {
     `);
   });
 
-  // Afficher la fenêtre une fois le contenu prêt (évite le flash blanc)
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-  });
+  // Afficher la fenêtre immédiatement pour éviter qu'elle reste cachée
+  mainWindow.show();
 
   // Charger l'URL du serveur Vibe Kanban
   mainWindow.loadURL(SERVER_URL);
@@ -305,12 +303,61 @@ function createWindow() {
     // Réessayer de se connecter
     const isRunning = await checkServerRunning();
     if (isRunning) {
-      mainWindow.loadURL(SERVER_URL);
+      console.log('Server is running, retrying...');
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL(SERVER_URL);
+        }
+      }, 1000);
     } else {
-      dialog.showErrorBox(
-        'Erreur de connexion',
-        `Impossible de se connecter au serveur Vibe Kanban sur ${SERVER_URL}\n\nVeuillez vérifier que le serveur fonctionne correctement.`
-      );
+      // Afficher une page d'erreur dans la fenêtre au lieu d'un dialog bloquant
+      console.error('Server not running, showing error page');
+      mainWindow.loadURL(`data:text/html;charset=utf-8,
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <style>
+            body {
+              background: #1a1a1a;
+              color: #ffffff;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+              margin: 0;
+              padding: 20px;
+            }
+            .container {
+              text-align: center;
+              max-width: 600px;
+            }
+            h1 { color: #ff6b6b; }
+            p { line-height: 1.6; }
+            .retry-btn {
+              background: #4CAF50;
+              color: white;
+              border: none;
+              padding: 12px 24px;
+              font-size: 16px;
+              border-radius: 4px;
+              cursor: pointer;
+              margin-top: 20px;
+            }
+            .retry-btn:hover { background: #45a049; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>Serveur Vibe Kanban non disponible</h1>
+            <p>Impossible de se connecter au serveur Vibe Kanban sur <code>${SERVER_URL}</code></p>
+            <p>Veuillez démarrer le serveur Vibe Kanban manuellement et cliquer sur le bouton ci-dessous.</p>
+            <button class="retry-btn" onclick="location.reload()">Réessayer</button>
+          </div>
+        </body>
+        </html>
+      `);
     }
   });
 }
