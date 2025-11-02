@@ -296,71 +296,9 @@ function createWindow() {
     mainWindow.focus();
   }
 
-  // Afficher une page de chargement pendant que le serveur démarre
-  mainWindow.loadURL(`data:text/html;charset=utf-8,
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <style>
-        body {
-          background: #1a1a1a;
-          color: #ffffff;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          height: 100vh;
-          margin: 0;
-        }
-        .loader {
-          text-align: center;
-        }
-        .spinner {
-          border: 4px solid #333;
-          border-top: 4px solid #4CAF50;
-          border-radius: 50%;
-          width: 50px;
-          height: 50px;
-          animation: spin 1s linear infinite;
-          margin: 0 auto 20px;
-        }
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        h2 { margin: 10px 0; color: #4CAF50; }
-        p { color: #999; }
-      </style>
-    </head>
-    <body>
-      <div class="loader">
-        <div class="spinner"></div>
-        <h2>Démarrage de Vibe Kanban</h2>
-        <p>Veuillez patienter...</p>
-      </div>
-      <script>
-        // Essayer de charger le serveur toutes les 2 secondes
-        let attempts = 0;
-        const maxAttempts = 30;
-        const checkServer = setInterval(() => {
-          attempts++;
-          fetch('${SERVER_URL}')
-            .then(() => {
-              clearInterval(checkServer);
-              window.location.href = '${SERVER_URL}';
-            })
-            .catch(() => {
-              if (attempts >= maxAttempts) {
-                clearInterval(checkServer);
-                document.body.innerHTML = '<div class="loader"><h2 style="color: #ff6b6b;">Erreur de connexion</h2><p>Le serveur Vibe Kanban n\\'a pas pu démarrer.</p></div>';
-              }
-            });
-        }, 2000);
-      </script>
-    </body>
-    </html>
-  `);
+  // Charger l'URL du serveur Vibe Kanban
+  // Le gestionnaire did-fail-load gérera les reconnexions automatiques
+  mainWindow.loadURL(SERVER_URL);
 
   // Ouvrir DevTools en développement uniquement (optionnel)
   // mainWindow.webContents.openDevTools();
@@ -369,20 +307,27 @@ function createWindow() {
     mainWindow = null;
   });
 
+  // Compteur de tentatives de chargement
+  let loadAttempts = 0;
+  const maxLoadAttempts = 15; // 15 tentatives x 2 secondes = 30 secondes max
+
   // Gérer les erreurs de chargement
   mainWindow.webContents.on('did-fail-load', async (event, errorCode, errorDescription) => {
-    console.error('Failed to load:', errorCode, errorDescription);
+    console.error('Failed to load:', errorCode, errorDescription, `Attempt ${loadAttempts + 1}/${maxLoadAttempts}`);
 
-    // Réessayer de se connecter
-    const isRunning = await checkServerRunning();
-    if (isRunning) {
-      console.log('Server is running, retrying...');
+    loadAttempts++;
+
+    // Réessayer de se connecter si on n'a pas dépassé le maximum de tentatives
+    if (loadAttempts < maxLoadAttempts) {
+      console.log(`Retrying in 2 seconds... (attempt ${loadAttempts}/${maxLoadAttempts})`);
       setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.loadURL(SERVER_URL);
         }
-      }, 1000);
+      }, 2000);
     } else {
+      // Après max tentatives, afficher page d'erreur
+      loadAttempts = 0; // Reset pour le bouton retry
       // Afficher une page d'erreur dans la fenêtre au lieu d'un dialog bloquant
       console.error('Server not running, showing error page');
       mainWindow.loadURL(`data:text/html;charset=utf-8,
