@@ -301,6 +301,57 @@ function createWindow() {
   // Ouvrir DevTools en développement uniquement (optionnel)
   // mainWindow.webContents.openDevTools();
 
+  // Intercepter la fermeture de la fenêtre pour afficher le dialog
+  mainWindow.on('close', async (event) => {
+    console.log('Window close event fired');
+
+    // Si déjà confirmé, laisser fermer
+    if (quitConfirmed) {
+      console.log('Quit already confirmed, closing window');
+      return;
+    }
+
+    // Si on a démarré le serveur, demander confirmation
+    if (serverWasStartedByApp && !isQuitting) {
+      console.log('Preventing close to show dialog');
+      event.preventDefault();
+      isQuitting = true;
+
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'question',
+        buttons: ['Arrêter Kanban', 'Laisser tourner', 'Annuler'],
+        defaultId: 0,
+        title: 'Fermeture de Vibe Kanban',
+        message: 'Voulez-vous arrêter le serveur Vibe Kanban ?',
+        detail: 'Le serveur Vibe Kanban a été démarré par cette application. Voulez-vous l\'arrêter en fermant l\'application ?',
+        cancelId: 2,
+        noLink: true
+      });
+
+      if (response === 0) {
+        // Arrêter le serveur
+        console.log('User chose to stop server');
+        if (serverProcess && !serverProcess.killed) {
+          serverProcess.kill('SIGTERM');
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        serverProcess = null;
+        quitConfirmed = true;
+        app.quit();
+      } else if (response === 1) {
+        // Laisser le serveur tourner
+        console.log('User chose to leave server running');
+        serverProcess = null;
+        quitConfirmed = true;
+        app.quit();
+      } else {
+        // Annuler
+        console.log('User cancelled quit');
+        isQuitting = false;
+      }
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
