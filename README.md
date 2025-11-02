@@ -1,6 +1,16 @@
 # Vibe Kanban Electron App
 
-Desktop application wrapper for [Vibe Kanban](https://github.com/vibekanban/vibe) that automatically launches the server and provides a native desktop experience.
+Desktop application wrapper for [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) that automatically launches the server and provides a native desktop experience.
+
+## About Vibe Kanban
+
+[Vibe Kanban](https://www.vibekanban.com/) is an open-source Kanban board designed to manage and orchestrate AI coding agents. Created by [BloopAI](https://github.com/BloopAI), it helps you track tasks, pull requests, commits, and reviews directly through GitHub integration.
+
+- **Official Repository**: [github.com/BloopAI/vibe-kanban](https://github.com/BloopAI/vibe-kanban)
+- **Website**: [vibekanban.com](https://www.vibekanban.com/)
+- **License**: MIT License
+
+This Electron wrapper is a community-created project by [timiliris](https://github.com/timiliris) and is not officially affiliated with BloopAI or the Vibe Kanban team.
 
 ## Features
 
@@ -133,8 +143,8 @@ This app implements several security measures:
 
 MIT
 
-## Author
+## Credits
 
-Created by [timiliris](https://github.com/timiliris)
+**Electron Wrapper**: Created by [timiliris](https://github.com/timiliris)
 
-**Note**: This is a community-created wrapper for Vibe Kanban and is not officially affiliated with the Vibe Kanban team.
+**Vibe Kanban**: Developed by [BloopAI](https://github.com/BloopAI) - See [github.com/BloopAI/vibe-kanban](https://github.com/BloopAI/vibe-kanban)
