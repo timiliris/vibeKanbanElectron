@@ -426,7 +426,8 @@ app.on('before-quit', async (event) => {
   }
 
   // Si on a démarré le serveur nous-mêmes, demander à l'utilisateur
-  if (serverWasStartedByApp && serverProcess && !serverProcess.killed && !isQuitting) {
+  // Note: on ne vérifie pas serverProcess.killed car il peut être faux positif
+  if (serverWasStartedByApp && !isQuitting) {
     console.log('Showing quit confirmation dialog');
     event.preventDefault(); // Empêcher la fermeture immédiate
     isQuitting = true;
