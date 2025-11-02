@@ -4,9 +4,6 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 
-// Définir le nom de l'application (doit être fait avant app.ready)
-app.setName('Vibe Kanban');
-
 // Fonction pour créer le menu macOS
 function createMenu() {
   if (process.platform !== 'darwin') return;
@@ -69,6 +66,7 @@ function createMenu() {
 
 let mainWindow;
 let serverProcess;
+let serverWasStartedByApp = false; // Track si on a démarré le serveur nous-mêmes
 const SERVER_PORT = 58045;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
@@ -95,10 +93,12 @@ async function startVibeKanbanServer() {
   const isRunning = await checkServerRunning();
   if (isRunning) {
     console.log('Server is already running!');
+    serverWasStartedByApp = false; // Le serveur était déjà en cours d'exécution
     return true;
   }
 
   console.log('Starting Vibe Kanban server...');
+  serverWasStartedByApp = true; // On démarre le serveur nous-mêmes
 
   try {
     // Tente de démarrer le serveur avec différentes commandes possibles
@@ -279,10 +279,12 @@ app.whenReady().then(async () => {
 
   const serverStarted = await startVibeKanbanServer();
 
-  if (serverStarted) {
-    createWindow();
-  } else {
-    app.quit();
+  // Ouvrir la fenêtre dans tous les cas
+  createWindow();
+
+  // Si le serveur n'a pas démarré, la page affichera une erreur de connexion
+  if (!serverStarted) {
+    console.log('Server not started, but window will open anyway');
   }
 
   app.on('activate', () => {
@@ -298,11 +300,40 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
-  // Arrêter le serveur quand l'application se ferme
-  if (serverProcess && !serverProcess.killed) {
-    console.log('Stopping Vibe Kanban server...');
-    serverProcess.kill();
+app.on('before-quit', async (event) => {
+  // Si on a démarré le serveur nous-mêmes, demander à l'utilisateur
+  if (serverWasStartedByApp && serverProcess && !serverProcess.killed) {
+    event.preventDefault(); // Empêcher la fermeture immédiate
+
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      buttons: ['Arrêter Kanban', 'Laisser tourner', 'Annuler'],
+      defaultId: 0,
+      title: 'Fermeture de Vibe Kanban',
+      message: 'Voulez-vous arrêter le serveur Vibe Kanban ?',
+      detail: 'Le serveur Vibe Kanban a été démarré par cette application. Voulez-vous l\'arrêter en fermant l\'application ?',
+      cancelId: 2
+    });
+
+    if (response === 0) {
+      // Arrêter le serveur
+      console.log('Stopping Vibe Kanban server...');
+      serverProcess.kill();
+      serverProcess = null;
+      app.exit(0);
+    } else if (response === 1) {
+      // Laisser le serveur tourner
+      console.log('Leaving Vibe Kanban server running...');
+      serverProcess = null; // Ne pas tuer le processus
+      app.exit(0);
+    }
+    // Si response === 2 (Annuler), ne rien faire (l'app reste ouverte)
+  } else {
+    // Si on n'a pas démarré le serveur, ne rien faire de spécial
+    if (serverProcess && !serverProcess.killed) {
+      console.log('Detaching from Vibe Kanban server...');
+      serverProcess = null;
+    }
   }
 });
 
