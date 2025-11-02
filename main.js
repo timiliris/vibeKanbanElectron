@@ -480,8 +480,20 @@ app.on('before-quit', (event) => {
     event.preventDefault();
     isQuitting = true;
 
+    // Créer une fenêtre temporaire invisible pour le dialog si nécessaire
+    let dialogParent = null;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      dialogParent = new BrowserWindow({
+        show: false,
+        width: 1,
+        height: 1
+      });
+    } else {
+      dialogParent = mainWindow;
+    }
+
     // Utiliser showMessageBoxSync pour une réponse synchrone
-    const response = dialog.showMessageBoxSync({
+    const response = dialog.showMessageBoxSync(dialogParent, {
       type: 'question',
       buttons: ['Arrêter Kanban', 'Laisser tourner', 'Annuler'],
       defaultId: 0,
@@ -491,6 +503,11 @@ app.on('before-quit', (event) => {
       cancelId: 2,
       noLink: true
     });
+
+    // Fermer la fenêtre temporaire si on en a créé une
+    if (dialogParent !== mainWindow && !dialogParent.isDestroyed()) {
+      dialogParent.destroy();
+    }
 
     if (response === 0) {
       // Arrêter le serveur
