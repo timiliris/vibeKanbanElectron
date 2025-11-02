@@ -456,18 +456,15 @@ let isQuitting = false;
 let quitConfirmed = false;
 
 app.on('window-all-closed', () => {
-  // Sur macOS, ne pas quitter quand toutes les fenêtres sont fermées
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  // Sur macOS, quitter quand toutes les fenêtres sont fermées
+  // Le dialog de confirmation sera géré dans before-quit
+  app.quit();
 });
 
-app.on('before-quit', async (event) => {
+app.on('before-quit', (event) => {
   console.log('before-quit event fired');
   console.log('quitConfirmed:', quitConfirmed);
   console.log('serverWasStartedByApp:', serverWasStartedByApp);
-  console.log('serverProcess exists:', !!serverProcess);
-  console.log('serverProcess.killed:', serverProcess ? serverProcess.killed : 'N/A');
   console.log('isQuitting:', isQuitting);
 
   // Si déjà confirmé, laisser quitter
@@ -476,14 +473,14 @@ app.on('before-quit', async (event) => {
     return;
   }
 
-  // Si on a démarré le serveur nous-mêmes, demander à l'utilisateur
-  // Note: on ne vérifie pas serverProcess.killed car il peut être faux positif
+  // Si on a démarré le serveur, demander confirmation
   if (serverWasStartedByApp && !isQuitting) {
-    console.log('Showing quit confirmation dialog');
-    event.preventDefault(); // Empêcher la fermeture immédiate
+    console.log('Preventing quit to show dialog');
+    event.preventDefault();
     isQuitting = true;
 
-    const { response } = await dialog.showMessageBox(mainWindow && !mainWindow.isDestroyed() ? mainWindow : null, {
+    // Utiliser showMessageBoxSync pour une réponse synchrone
+    const response = dialog.showMessageBoxSync({
       type: 'question',
       buttons: ['Arrêter Kanban', 'Laisser tourner', 'Annuler'],
       defaultId: 0,
@@ -499,23 +496,24 @@ app.on('before-quit', async (event) => {
       console.log('Stopping Vibe Kanban server...');
       if (serverProcess && !serverProcess.killed) {
         serverProcess.kill('SIGTERM');
-        // Attendre un peu que le processus se termine proprement
-        await new Promise(resolve => setTimeout(resolve, 500));
       }
       serverProcess = null;
       quitConfirmed = true;
+      isQuitting = false;
       app.quit();
     } else if (response === 1) {
       // Laisser le serveur tourner
       console.log('Leaving Vibe Kanban server running...');
-      serverProcess = null; // Ne pas tuer le processus
+      serverProcess = null;
       quitConfirmed = true;
+      isQuitting = false;
       app.quit();
     } else {
-      // Annuler - reset le flag
+      // Annuler
+      console.log('User cancelled quit');
       isQuitting = false;
     }
-  } else if (!serverWasStartedByApp && serverProcess && !serverProcess.killed) {
+  } else if (!serverWasStartedByApp && serverProcess) {
     // Si on n'a pas démarré le serveur, juste se détacher
     console.log('Detaching from Vibe Kanban server...');
     serverProcess = null;
