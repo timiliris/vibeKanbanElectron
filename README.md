@@ -112,10 +112,23 @@ To modify the icons, update the logo files in `assets/` and run:
 npm run generate-icons
 ```
 
+## Security
+
+This app implements several security measures:
+- Content Security Policy (CSP) to prevent XSS attacks
+- Navigation restricted to localhost only
+- Sandboxed renderer process
+- No Node.js integration in renderer
+- Context isolation enabled
+- Filtered environment variables passed to server
+- DevTools disabled in production builds
+
 ## License
 
 MIT
 
 ## Author
 
-Vibe Kanban Team
+Created by [timiliris](https://github.com/timiliris)
+
+**Note**: This is a community-created wrapper for Vibe Kanban and is not officially affiliated with the Vibe Kanban team.

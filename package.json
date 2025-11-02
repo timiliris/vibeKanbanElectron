@@ -17,9 +17,13 @@
     "vibe",
     "kanban"
   ],
-  "author": "Vibe Kanban Team",
+  "author": "timiliris <https://github.com/timiliris>",
   "license": "MIT",
-  "homepage": "https://vibekanban.com",
+  "homepage": "https://github.com/timiliris/vibeKanbanElectron",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/timiliris/vibeKanbanElectron.git"
+  },
   "devDependencies": {
     "electron": "^39.0.0",
     "electron-builder": "^24.9.1",

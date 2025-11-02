@@ -8,6 +8,8 @@ const fs = require('fs');
 function createMenu() {
   if (process.platform !== 'darwin') return;
 
+  const isDev = !app.isPackaged;
+
   const template = [
     {
       label: app.name,
@@ -40,7 +42,8 @@ function createMenu() {
       submenu: [
         { role: 'reload', label: 'Recharger' },
         { role: 'forceReload', label: 'Forcer le rechargement' },
-        { role: 'toggleDevTools', label: 'Outils de développement' },
+        // DevTools uniquement en développement
+        ...(isDev ? [{ role: 'toggleDevTools', label: 'Outils de développement' }] : []),
         { type: 'separator' },
         { role: 'resetZoom', label: 'Zoom réel' },
         { role: 'zoomIn', label: 'Zoom avant' },
@@ -110,10 +113,19 @@ async function startVibeKanbanServer() {
 
     for (const { cmd, args } of commands) {
       try {
+        // Filtrer les variables d'environnement pour ne passer que celles nécessaires
+        const safeEnv = {
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+          USER: process.env.USER,
+          LANG: process.env.LANG,
+          PORT: SERVER_PORT.toString()
+        };
+
         serverProcess = spawn(cmd, args, {
           detached: false,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, PORT: SERVER_PORT.toString() }
+          env: safeEnv
         });
 
         serverProcess.stdout.on('data', (data) => {
@@ -187,7 +199,10 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: true
+      webSecurity: true,
+      sandbox: true, // Active le sandbox pour plus de sécurité
+      allowRunningInsecureContent: false,
+      experimentalFeatures: false
     },
     title: 'Vibe Kanban',
     show: false // Ne pas afficher immédiatement
@@ -204,6 +219,42 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+
+  // Bloquer toute navigation externe (sécurité)
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const parsedUrl = new URL(url);
+    // Autoriser uniquement localhost
+    if (parsedUrl.hostname !== '127.0.0.1' && parsedUrl.hostname !== 'localhost') {
+      console.warn('Navigation bloquée vers:', url);
+      event.preventDefault();
+    }
+  });
+
+  // Bloquer l'ouverture de nouvelles fenêtres (sécurité)
+  mainWindow.webContents.setWindowOpenHandler(() => {
+    return { action: 'deny' };
+  });
+
+  // Définir une Content Security Policy stricte
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self'; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " + // Nécessaire pour Vibe Kanban
+          "style-src 'self' 'unsafe-inline'; " +
+          "img-src 'self' data: blob:; " +
+          "connect-src 'self' ws://127.0.0.1:* ws://localhost:*; " +
+          "font-src 'self' data:; " +
+          "media-src 'self'; " +
+          "object-src 'none'; " +
+          "frame-src 'none'; " +
+          "base-uri 'self';"
+        ]
+      }
+    });
+  });
 
   // Injecter le correctif WebSocket AVANT que la page ne charge
   mainWindow.webContents.on('did-start-loading', () => {
@@ -294,16 +345,26 @@ app.whenReady().then(async () => {
   });
 });
 
+let isQuitting = false;
+let quitConfirmed = false;
+
 app.on('window-all-closed', () => {
+  // Sur macOS, ne pas quitter quand toutes les fenêtres sont fermées
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
 app.on('before-quit', async (event) => {
+  // Si déjà confirmé, laisser quitter
+  if (quitConfirmed) {
+    return;
+  }
+
   // Si on a démarré le serveur nous-mêmes, demander à l'utilisateur
-  if (serverWasStartedByApp && serverProcess && !serverProcess.killed) {
+  if (serverWasStartedByApp && serverProcess && !serverProcess.killed && !isQuitting) {
     event.preventDefault(); // Empêcher la fermeture immédiate
+    isQuitting = true;
 
     const { response } = await dialog.showMessageBox({
       type: 'question',
@@ -312,28 +373,35 @@ app.on('before-quit', async (event) => {
       title: 'Fermeture de Vibe Kanban',
       message: 'Voulez-vous arrêter le serveur Vibe Kanban ?',
       detail: 'Le serveur Vibe Kanban a été démarré par cette application. Voulez-vous l\'arrêter en fermant l\'application ?',
-      cancelId: 2
+      cancelId: 2,
+      noLink: true
     });
 
     if (response === 0) {
       // Arrêter le serveur
       console.log('Stopping Vibe Kanban server...');
-      serverProcess.kill();
+      if (serverProcess && !serverProcess.killed) {
+        serverProcess.kill('SIGTERM');
+        // Attendre un peu que le processus se termine proprement
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
       serverProcess = null;
-      app.exit(0);
+      quitConfirmed = true;
+      app.quit();
     } else if (response === 1) {
       // Laisser le serveur tourner
       console.log('Leaving Vibe Kanban server running...');
       serverProcess = null; // Ne pas tuer le processus
-      app.exit(0);
+      quitConfirmed = true;
+      app.quit();
+    } else {
+      // Annuler - reset le flag
+      isQuitting = false;
     }
-    // Si response === 2 (Annuler), ne rien faire (l'app reste ouverte)
-  } else {
-    // Si on n'a pas démarré le serveur, ne rien faire de spécial
-    if (serverProcess && !serverProcess.killed) {
-      console.log('Detaching from Vibe Kanban server...');
-      serverProcess = null;
-    }
+  } else if (!serverWasStartedByApp && serverProcess && !serverProcess.killed) {
+    // Si on n'a pas démarré le serveur, juste se détacher
+    console.log('Detaching from Vibe Kanban server...');
+    serverProcess = null;
   }
 });
 
