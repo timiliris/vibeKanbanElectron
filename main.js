@@ -112,7 +112,8 @@ async function startVibeKanbanServer() {
       try {
         serverProcess = spawn(cmd, args, {
           detached: false,
-          stdio: ['ignore', 'pipe', 'pipe']
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, PORT: SERVER_PORT.toString() }
         });
 
         serverProcess.stdout.on('data', (data) => {
@@ -137,13 +138,12 @@ async function startVibeKanbanServer() {
       }
     }
 
-    throw new Error('Could not start Vibe Kanban server with any command');
+    console.log('Could not start Vibe Kanban server with any command');
+    return false;
   } catch (error) {
     console.error('Error starting server:', error);
-    dialog.showErrorBox(
-      'Erreur de démarrage',
-      `Impossible de démarrer le serveur Vibe Kanban.\n\nAssurez-vous que Vibe Kanban est installé.\n\nErreur: ${error.message}`
-    );
+    // Note: On ne bloque pas avec dialog.showErrorBox pour permettre à l'app de continuer
+    // L'utilisateur verra l'erreur de connexion dans la fenêtre
     return false;
   }
 }
