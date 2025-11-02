@@ -307,29 +307,27 @@ function createWindow() {
     mainWindow = null;
   });
 
-  // Compteur de tentatives de chargement
-  let loadAttempts = 0;
-  const maxLoadAttempts = 15; // 15 tentatives x 2 secondes = 30 secondes max
-
-  // Gérer les erreurs de chargement
+  // Gérer les erreurs de chargement - réessayer indéfiniment
   mainWindow.webContents.on('did-fail-load', async (event, errorCode, errorDescription) => {
-    console.error('Failed to load:', errorCode, errorDescription, `Attempt ${loadAttempts + 1}/${maxLoadAttempts}`);
+    console.error('Failed to load:', errorCode, errorDescription);
 
-    loadAttempts++;
+    // Réessayer après 3 secondes
+    console.log('Retrying in 3 seconds...');
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadURL(SERVER_URL);
+      }
+    }, 3000);
+  });
 
-    // Réessayer de se connecter si on n'a pas dépassé le maximum de tentatives
-    if (loadAttempts < maxLoadAttempts) {
-      console.log(`Retrying in 2 seconds... (attempt ${loadAttempts}/${maxLoadAttempts})`);
-      setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.loadURL(SERVER_URL);
-        }
-      }, 2000);
-    } else {
-      // Après max tentatives, afficher page d'erreur
-      loadAttempts = 0; // Reset pour le bouton retry
-      // Afficher une page d'erreur dans la fenêtre au lieu d'un dialog bloquant
-      console.error('Server not running, showing error page');
+  // Quand la page charge avec succès, reset le compteur
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('Page loaded successfully!');
+  });
+
+  // Supprimer l'ancienne page d'erreur - on réessaie indéfiniment
+  /*
+  if (false) {  // Code désactivé
       mainWindow.loadURL(`data:text/html;charset=utf-8,
         <!DOCTYPE html>
         <html>
@@ -377,7 +375,8 @@ function createWindow() {
         </html>
       `);
     }
-  });
+  }
+  */
 }
 
 app.whenReady().then(async () => {
