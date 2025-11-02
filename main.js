@@ -298,7 +298,7 @@ function createWindow() {
   // Charger l'URL du serveur Vibe Kanban
   mainWindow.loadURL(SERVER_URL);
 
-  // Ouvrir DevTools en développement (optionnel)
+  // Ouvrir DevTools en développement uniquement (optionnel)
   // mainWindow.webContents.openDevTools();
 
   mainWindow.on('closed', () => {
