@@ -385,15 +385,15 @@ app.whenReady().then(async () => {
     }
   }
 
-  const serverStarted = await startVibeKanbanServer();
-
-  // Ouvrir la fenêtre dans tous les cas
+  // Ouvrir la fenêtre immédiatement
   createWindow();
 
-  // Si le serveur n'a pas démarré, la page affichera une erreur de connexion
-  if (!serverStarted) {
-    console.log('Server not started, but window will open anyway');
-  }
+  // Démarrer le serveur en arrière-plan
+  startVibeKanbanServer().then(serverStarted => {
+    if (!serverStarted) {
+      console.log('Server failed to start, but window is already open');
+    }
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
