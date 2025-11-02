@@ -581,7 +581,27 @@ function createMenu() {
     {
       label: app.name,
       submenu: [
-        { role: 'about', label: 'About Vibe Kanban' },
+        {
+          label: 'About Vibe Kanban',
+          click: () => {
+            dialog.showMessageBox({
+              type: 'info',
+              title: 'About Vibe Kanban',
+              message: 'Vibe Kanban Electron Wrapper',
+              detail: `Version: ${app.getVersion()}
+
+Vibe Kanban is an open-source Kanban board for managing AI coding agents, developed by BloopAI.
+
+Official Repository: github.com/BloopAI/vibe-kanban
+Website: vibekanban.com
+
+This Electron wrapper was created by timiliris and is not officially affiliated with BloopAI or the Vibe Kanban team.
+
+Wrapper Repository: github.com/timiliris/vibeKanbanElectron`,
+              buttons: ['OK']
+            });
+          }
+        },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
