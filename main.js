@@ -22,7 +22,13 @@ function createMenu() {
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        { role: 'quit', label: 'Quitter Vibe Kanban' }
+        {
+          label: 'Quitter Vibe Kanban',
+          accelerator: 'Command+Q',
+          click: () => {
+            app.quit();
+          }
+        }
       ]
     },
     {
