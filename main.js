@@ -4,7 +4,574 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 
-// Fonction pour créer le menu macOS
+const isWindows = process.platform === 'win32';
+
+const LOADING_SCREEN_HTML = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Vibe Kanban</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #32322E;
+    color: #d8dde9;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .brand {
+    font-size: clamp(2.4rem, 4vw, 3.6rem);
+    letter-spacing: 0.55rem;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.82);
+    font-weight: 600;
+    text-align: center;
+    text-shadow: 0 18px 30px rgba(0, 0, 0, 0.45);
+  }
+  .status-pill {
+    position: fixed;
+    right: 28px;
+    bottom: 28px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 18px;
+    background: rgba(14, 14, 13, 0.72);
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: 0 18px 34px rgba(3, 3, 2, 0.6);
+    backdrop-filter: blur(18px);
+    max-width: min(360px, 70vw);
+  }
+  .indicator {
+    content: '';
+    position: relative;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #8b74ff, #5b9dff);
+    box-shadow: 0 0 18px rgba(91, 157, 255, 0.5);
+  }
+  .indicator::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    background: rgba(91, 157, 255, 0.28);
+    opacity: 0.75;
+    animation: pulse 2.6s ease-out infinite;
+  }
+  @keyframes pulse {
+    0% { transform: scale(0.5); opacity: 0.75; }
+    80% { transform: scale(1.4); opacity: 0; }
+    100% { transform: scale(1.4); opacity: 0; }
+  }
+  .status-text {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+  h1 {
+    font-size: 0.95rem;
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: rgba(237, 240, 252, 0.95);
+  }
+  p {
+    margin: 0;
+    line-height: 1.4;
+    color: rgba(204, 212, 230, 0.82);
+    font-size: 0.85rem;
+  }
+  .detail { font-size: 0.85rem; }
+  .subtle { font-size: 0.78rem; color: rgba(168, 180, 202, 0.78); }
+  .state-info { color: #91a3ff; }
+  .state-warn { color: #ffb347; }
+  .state-error { color: #ff8080; }
+</style>
+</head>
+<body>
+  <div class="brand">VIBE KANBAN</div>
+  <div class="status-pill">
+    <div class="indicator" aria-hidden="true"></div>
+    <div class="status-text">
+      <h1 id="status-title">Initializing Vibe Kanban…</h1>
+      <p id="status-detail" class="detail">Preparing local server.</p>
+      <p id="status-sub" class="detail subtle" style="display:none;"></p>
+    </div>
+  </div>
+<script>
+  window.__updateStatus = function(payload) {
+    if (!payload) return;
+
+    var titleEl = document.getElementById('status-title');
+    var detailEl = document.getElementById('status-detail');
+    var subEl = document.getElementById('status-sub');
+
+    if (payload.title) {
+      titleEl.textContent = payload.title;
+    }
+
+    if (payload.state) {
+      titleEl.className = 'state-' + payload.state;
+    } else {
+      titleEl.className = '';
+    }
+
+    if (payload.detail) {
+      detailEl.textContent = payload.detail;
+      detailEl.style.display = 'block';
+    } else {
+      detailEl.style.display = 'none';
+    }
+
+    if (payload.subDetail) {
+      subEl.textContent = payload.subDetail;
+      subEl.style.display = 'block';
+    } else {
+      subEl.style.display = 'none';
+    }
+  };
+</script>
+</body>
+</html>
+`;
+
+const LOADING_SCREEN_URL = `data:text/html;charset=utf-8,${encodeURIComponent(LOADING_SCREEN_HTML)}`;
+
+let loadingScreenActive = false;
+let loadingScreenReady = false;
+let lastLoadingPayload = null;
+const pendingLoadingMessages = [];
+
+const LOADING_STATE_PRIORITY = { error: 3, warn: 2, info: 1 };
+
+let currentLoadingSeverity = 0;
+let loadingStatusHoldUntil = 0;
+let loadingStatusReleaseTimer = null;
+let queuedStatusAfterHold = null;
+let queuedStatusPayloadKey = null;
+
+function isLoadingScreen(url = '') {
+  return typeof url === 'string' && url.startsWith('data:text/html');
+}
+
+function getLoadingSeverity(status) {
+  if (!status || !status.state) {
+    return 1;
+  }
+  return LOADING_STATE_PRIORITY[status.state] || 1;
+}
+
+function clearLoadingStatusHold() {
+  currentLoadingSeverity = 0;
+  loadingStatusHoldUntil = 0;
+  queuedStatusAfterHold = null;
+  queuedStatusPayloadKey = null;
+  if (loadingStatusReleaseTimer) {
+    clearTimeout(loadingStatusReleaseTimer);
+    loadingStatusReleaseTimer = null;
+  }
+}
+
+function queueStatusAfterHold(status, payloadKey) {
+  if (queuedStatusPayloadKey === payloadKey) {
+    return;
+  }
+
+  queuedStatusAfterHold = status;
+  queuedStatusPayloadKey = payloadKey;
+  scheduleLoadingStatusRelease();
+}
+
+function scheduleLoadingStatusRelease() {
+  if (!loadingStatusHoldUntil) {
+    processQueuedStatusAfterHold();
+    return;
+  }
+
+  const delay = Math.max(0, loadingStatusHoldUntil - Date.now());
+
+  if (loadingStatusReleaseTimer) {
+    clearTimeout(loadingStatusReleaseTimer);
+  }
+
+  loadingStatusReleaseTimer = setTimeout(() => {
+    loadingStatusReleaseTimer = null;
+    processQueuedStatusAfterHold();
+  }, delay || 0);
+}
+
+function processQueuedStatusAfterHold() {
+  if (loadingStatusHoldUntil && Date.now() < loadingStatusHoldUntil) {
+    scheduleLoadingStatusRelease();
+    return;
+  }
+
+  loadingStatusHoldUntil = 0;
+  currentLoadingSeverity = 0;
+
+  if (queuedStatusAfterHold) {
+    const status = queuedStatusAfterHold;
+    const payloadKey = queuedStatusPayloadKey;
+    queuedStatusAfterHold = null;
+    queuedStatusPayloadKey = null;
+    sendLoadingStatus(status, { force: true, payloadKey });
+  } else {
+    flushPendingLoadingMessages();
+  }
+}
+
+function sanitizeCliMessage(message) {
+  if (!message) {
+    return '';
+  }
+
+  const normalized = message
+    .replace(/\r/g, '\n')
+    .replace(/[\u001b\u009b][\[\]()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '')
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, '')
+    .replace(/\u0007/g, '')
+    .replace(/\n{2,}/g, '\n');
+
+  return normalized.trim();
+}
+
+function summarizeCliMessage(message, { maxLength = 160 } = {}) {
+  const sanitized = sanitizeCliMessage(message);
+  if (!sanitized) {
+    return '';
+  }
+
+  const firstLine = sanitized.split('\n')[0].trim();
+  if (!firstLine) {
+    return '';
+  }
+
+  if (firstLine.length <= maxLength) {
+    return firstLine;
+  }
+
+  return `${firstLine.slice(0, maxLength - 1)}…`;
+}
+
+function resetLoadingScreenState() {
+  loadingScreenActive = true;
+  loadingScreenReady = false;
+  lastLoadingPayload = null;
+  pendingLoadingMessages.length = 0;
+  clearLoadingStatusHold();
+}
+
+function deactivateLoadingScreen() {
+  loadingScreenActive = false;
+  loadingScreenReady = false;
+  lastLoadingPayload = null;
+  pendingLoadingMessages.length = 0;
+  clearLoadingStatusHold();
+}
+
+async function flushPendingLoadingMessages() {
+  if (!loadingScreenActive) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!loadingScreenReady) return;
+
+  const currentUrl = mainWindow.webContents.getURL();
+  if (!isLoadingScreen(currentUrl)) {
+    pendingLoadingMessages.length = 0;
+    return;
+  }
+
+  while (pendingLoadingMessages.length > 0) {
+    const message = pendingLoadingMessages[0];
+    const result = await sendLoadingStatus(message, {
+      fromPendingQueue: true
+    });
+
+    if (result === 'sent' || result === 'duplicate' || result === 'error') {
+      pendingLoadingMessages.shift();
+      continue;
+    }
+
+    if (result === 'inactive' || result === 'pending' || result === 'queued') {
+      break;
+    }
+
+    pendingLoadingMessages.shift();
+  }
+}
+
+async function sendLoadingStatus(status, options = {}) {
+  if (!loadingScreenActive) {
+    return 'inactive';
+  }
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return 'inactive';
+  }
+
+  const {
+    force = false,
+    payloadKey: providedPayloadKey,
+    fromPendingQueue = false
+  } = options;
+
+  const payloadKey = providedPayloadKey || JSON.stringify(status);
+
+  if (!force && payloadKey === lastLoadingPayload) {
+    return 'duplicate';
+  }
+
+  const severity = getLoadingSeverity(status);
+  const now = Date.now();
+
+  if (!force && loadingStatusHoldUntil && now < loadingStatusHoldUntil && severity < currentLoadingSeverity) {
+    queueStatusAfterHold(status, payloadKey);
+    return 'queued';
+  }
+
+  if (loadingStatusHoldUntil && now >= loadingStatusHoldUntil) {
+    loadingStatusHoldUntil = 0;
+    currentLoadingSeverity = 0;
+  }
+
+  const currentUrl = mainWindow.webContents.getURL();
+  if (!isLoadingScreen(currentUrl)) {
+    if (!fromPendingQueue) {
+      pendingLoadingMessages.push(status);
+    }
+    return 'pending';
+  }
+
+  if (!loadingScreenReady) {
+    if (!fromPendingQueue) {
+      pendingLoadingMessages.push(status);
+    }
+    return 'pending';
+  }
+
+  try {
+    await mainWindow.webContents.executeJavaScript(
+      `window.__updateStatus && window.__updateStatus(${JSON.stringify(status)})`
+    );
+  } catch (error) {
+    console.error('Failed to update loading screen:', error);
+    return 'error';
+  }
+
+  lastLoadingPayload = payloadKey;
+  currentLoadingSeverity = severity;
+
+  if (severity >= 2) {
+    loadingStatusHoldUntil = now + (severity === 3 ? 8000 : 4000);
+    scheduleLoadingStatusRelease();
+  } else {
+    loadingStatusHoldUntil = 0;
+    queuedStatusAfterHold = null;
+    queuedStatusPayloadKey = null;
+    if (loadingStatusReleaseTimer) {
+      clearTimeout(loadingStatusReleaseTimer);
+      loadingStatusReleaseTimer = null;
+    }
+  }
+
+  if (!fromPendingQueue) {
+    flushPendingLoadingMessages();
+  }
+
+  return 'sent';
+}
+
+async function showLoadingScreen(initialStatus) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  resetLoadingScreenState();
+
+  try {
+    await mainWindow.loadURL(LOADING_SCREEN_URL);
+  } catch (error) {
+    console.error('Failed to load loading screen:', error);
+    return;
+  }
+
+  if (initialStatus) {
+    await sendLoadingStatus(initialStatus);
+  }
+}
+
+async function loadVibeKanbanUI() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  try {
+    await mainWindow.loadURL(SERVER_URL);
+  } catch (error) {
+    console.error('Failed to load Vibe Kanban UI:', error);
+  }
+}
+
+function killProcessTree(pid, { force = false } = {}) {
+  if (pid === undefined || pid === null) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    if (isWindows) {
+      const args = ['/PID', String(pid), '/T'];
+      if (force) {
+        args.push('/F');
+      }
+
+      const killer = spawn('taskkill', args);
+      killer.once('exit', () => resolve());
+      killer.once('error', (error) => {
+        console.error('taskkill failed:', error);
+        resolve();
+      });
+      return;
+    }
+
+    try {
+      process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM');
+      resolve();
+    } catch (groupError) {
+      if (groupError.code === 'ESRCH') {
+        resolve();
+        return;
+      }
+
+      if (groupError.code === 'EINVAL' || groupError.code === 'EPERM') {
+        try {
+          process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
+        } catch (childError) {
+          if (childError.code !== 'ESRCH') {
+            console.error('Failed to kill process pid', pid, childError);
+          }
+        }
+      } else {
+        console.error('Failed to kill process group', groupError);
+      }
+
+      resolve();
+    }
+  });
+}
+
+function stopServerProcess({ force = false } = {}) {
+  if (!serverProcess) {
+    return Promise.resolve();
+  }
+
+  const processRef = serverProcess;
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const finalize = () => {
+      if (settled) return;
+      settled = true;
+
+      if (serverProcess === processRef) {
+        serverProcess = null;
+      }
+
+      serverWasStartedByApp = false;
+      resolve();
+    };
+
+    const clearListeners = () => {
+      processRef.removeListener('exit', onExit);
+      processRef.removeListener('close', onExit);
+      processRef.removeListener('error', onError);
+    };
+
+    const onExit = () => {
+      clearTimeout(forceTimer);
+      clearListeners();
+      finalize();
+    };
+
+    const onError = (error) => {
+      console.error('Server process error while stopping:', error);
+      clearTimeout(forceTimer);
+      clearListeners();
+      finalize();
+    };
+
+    processRef.once('exit', onExit);
+    processRef.once('close', onExit);
+    processRef.once('error', onError);
+
+    killProcessTree(processRef.pid, { force }).then(() => {
+      if (force) {
+        setTimeout(() => {
+          clearListeners();
+          finalize();
+        }, 500);
+      }
+    });
+
+    const forceTimer = setTimeout(() => {
+      killProcessTree(processRef.pid, { force: true }).finally(() => {
+        setTimeout(() => {
+          clearListeners();
+          finalize();
+        }, 500);
+      });
+    }, force ? 0 : 3500);
+  });
+}
+
+function resolveExecutable(executableName, { extraDirs = [] } = {}) {
+  const searchDirs = new Set();
+
+  const envPath = process.env.PATH || '';
+  for (const segment of envPath.split(path.delimiter)) {
+    if (segment) {
+      searchDirs.add(segment);
+    }
+  }
+
+  for (const dir of extraDirs) {
+    if (dir) {
+      searchDirs.add(dir);
+    }
+  }
+
+  if (!searchDirs.size) {
+    return null;
+  }
+
+  const extensions = isWindows
+    ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)
+    : [''];
+
+  for (const directory of searchDirs) {
+    for (const ext of extensions) {
+      const candidate = path.join(directory, isWindows ? executableName + ext : executableName);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+// Function to create the macOS menu
 function createMenu() {
   if (process.platform !== 'darwin') return;
 
@@ -14,16 +581,16 @@ function createMenu() {
     {
       label: app.name,
       submenu: [
-        { role: 'about', label: 'À propos de Vibe Kanban' },
+        { role: 'about', label: 'About Vibe Kanban' },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
-        { role: 'hide', label: 'Masquer Vibe Kanban' },
+        { role: 'hide', label: 'Hide Vibe Kanban' },
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
         {
-          label: 'Quitter Vibe Kanban',
+          label: 'Quit Vibe Kanban',
           accelerator: 'Command+Q',
           click: () => {
             app.quit();
@@ -32,39 +599,39 @@ function createMenu() {
       ]
     },
     {
-      label: 'Édition',
+      label: 'Edit',
       submenu: [
-        { role: 'undo', label: 'Annuler' },
-        { role: 'redo', label: 'Rétablir' },
+        { role: 'undo', label: 'Undo' },
+        { role: 'redo', label: 'Redo' },
         { type: 'separator' },
-        { role: 'cut', label: 'Couper' },
-        { role: 'copy', label: 'Copier' },
-        { role: 'paste', label: 'Coller' },
-        { role: 'selectAll', label: 'Tout sélectionner' }
+        { role: 'cut', label: 'Cut' },
+        { role: 'copy', label: 'Copy' },
+        { role: 'paste', label: 'Paste' },
+        { role: 'selectAll', label: 'Select All' }
       ]
     },
     {
-      label: 'Affichage',
+      label: 'View',
       submenu: [
-        { role: 'reload', label: 'Recharger' },
-        { role: 'forceReload', label: 'Forcer le rechargement' },
-        // DevTools uniquement en développement
-        ...(isDev ? [{ role: 'toggleDevTools', label: 'Outils de développement' }] : []),
+        { role: 'reload', label: 'Reload' },
+        { role: 'forceReload', label: 'Force Reload' },
+        // DevTools only in development
+        ...(isDev ? [{ role: 'toggleDevTools', label: 'Developer Tools' }] : []),
         { type: 'separator' },
-        { role: 'resetZoom', label: 'Zoom réel' },
-        { role: 'zoomIn', label: 'Zoom avant' },
-        { role: 'zoomOut', label: 'Zoom arrière' },
+        { role: 'resetZoom', label: 'Actual Size' },
+        { role: 'zoomIn', label: 'Zoom In' },
+        { role: 'zoomOut', label: 'Zoom Out' },
         { type: 'separator' },
-        { role: 'togglefullscreen', label: 'Plein écran' }
+        { role: 'togglefullscreen', label: 'Full Screen' }
       ]
     },
     {
-      label: 'Fenêtre',
+      label: 'Window',
       submenu: [
-        { role: 'minimize', label: 'Réduire' },
+        { role: 'minimize', label: 'Minimize' },
         { role: 'zoom', label: 'Zoom' },
         { type: 'separator' },
-        { role: 'front', label: 'Tout ramener au premier plan' }
+        { role: 'front', label: 'Bring All to Front' }
       ]
     }
   ];
@@ -75,7 +642,7 @@ function createMenu() {
 
 let mainWindow;
 let serverProcess;
-let serverWasStartedByApp = false; // Track si on a démarré le serveur nous-mêmes
+let serverWasStartedByApp = false; // Track if we started the server ourselves
 const SERVER_PORT = 58045;
 const SERVER_URL = `http://127.0.0.1:${SERVER_PORT}`;
 
@@ -99,62 +666,228 @@ function checkServerRunning() {
 async function startVibeKanbanServer() {
   console.log('Checking if Vibe Kanban server is already running...');
 
+  await sendLoadingStatus({
+    title: 'Looking for Vibe Kanban server…',
+    detail: 'Checking for existing process.'
+  });
+
   const isRunning = await checkServerRunning();
   if (isRunning) {
     console.log('Server is already running!');
-    serverWasStartedByApp = false; // Le serveur était déjà en cours d'exécution
+    serverWasStartedByApp = false;
+
+    await sendLoadingStatus({
+      title: 'Connecting to Vibe Kanban…',
+      detail: 'Local server is already running.'
+    });
+
     return true;
   }
 
   console.log('Starting Vibe Kanban server...');
-  serverWasStartedByApp = true; // On démarre le serveur nous-mêmes
+
+  await sendLoadingStatus({
+    title: 'Starting Vibe Kanban server…',
+    detail: 'Initializing via npx. This may take a moment.'
+  });
+
+  const knownNpxLocations = [
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+    '/opt/homebrew/bin',
+    path.join(process.env.HOME || '', '.npm-packages', 'bin'),
+    path.join(process.env.HOME || '', '.local', 'bin')
+  ];
+
+  const npxExecutable = resolveExecutable('npx', { extraDirs: knownNpxLocations });
+
+  if (!npxExecutable) {
+    await sendLoadingStatus({
+      title: 'npx not found',
+      detail: 'Unable to locate npx executable on this machine.',
+      subDetail: 'Install Node.js (including npm/npx) or add its path to PATH.',
+      state: 'error'
+    });
+
+    console.error('Unable to locate npx executable');
+    return false;
+  }
+
+  const env = {
+    ...process.env,
+    PORT: SERVER_PORT.toString(),
+    npm_config_yes: 'true'
+  };
+
+  const defaultPathSegments = knownNpxLocations.filter(Boolean);
+  const envPathSegments = (env.PATH || '').split(path.delimiter).filter(Boolean);
+  const mergedPath = Array.from(new Set([...envPathSegments, ...defaultPathSegments]));
+  env.PATH = mergedPath.join(path.delimiter);
+
+  let processRef;
 
   try {
-    // Démarrer le serveur avec npx vibe-kanban
-    console.log('Starting Vibe Kanban with npx...');
-
-    // Filtrer les variables d'environnement pour ne passer que celles nécessaires
-    const safeEnv = {
-      HOME: process.env.HOME,
-      PATH: process.env.PATH,
-      USER: process.env.USER,
-      LANG: process.env.LANG,
-      PORT: SERVER_PORT.toString()
-    };
-
-    serverProcess = spawn('npx', ['vibe-kanban', 'start'], {
-      detached: false,
+    processRef = spawn(npxExecutable, ['--yes', 'vibe-kanban', 'start'], {
+      detached: !isWindows,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: safeEnv
+      env
+    });
+  } catch (error) {
+    console.error('Failed to spawn Vibe Kanban server:', error);
+    serverProcess = null;
+    serverWasStartedByApp = false;
+
+    await sendLoadingStatus({
+      title: 'Failed to start Vibe Kanban',
+      detail: error.message,
+      state: 'error'
     });
 
-    serverProcess.stdout.on('data', (data) => {
-      console.log(`Vibe Kanban: ${data}`);
+    return false;
+  }
+
+  serverProcess = processRef;
+  serverWasStartedByApp = true;
+
+  let startupComplete = false;
+  let lastStdoutSnippet = '';
+  let lastStderrSnippet = '';
+
+  const handleOutput = (chunk, stream) => {
+    const text = chunk.toString();
+    if (!text) {
+      return;
+    }
+
+    const sanitized = sanitizeCliMessage(text);
+    if (!sanitized) {
+      return;
+    }
+
+    const snippet = summarizeCliMessage(sanitized, { maxLength: 140 });
+
+    if (stream === 'stderr') {
+      console.error(`Vibe Kanban Error: ${sanitized}`);
+    } else {
+      console.log(`Vibe Kanban: ${sanitized}`);
+    }
+
+    if (startupComplete || !loadingScreenActive) {
+      return;
+    }
+
+    const lower = sanitized.toLowerCase();
+
+    if (/need to install|installing|downloading/.test(lower)) {
+      sendLoadingStatus({
+        title: 'Installing Vibe Kanban…',
+        detail: 'Downloading required dependencies (first launch).',
+        subDetail: snippet,
+        state: 'info'
+      });
+      return;
+    }
+
+    if (stream === 'stderr') {
+      if (snippet && snippet !== lastStderrSnippet) {
+        lastStderrSnippet = snippet;
+        sendLoadingStatus({
+          title: 'Starting server…',
+          detail: 'Just a few more seconds…',
+          subDetail: snippet,
+          state: 'warn'
+        });
+      }
+      return;
+    }
+
+    if (snippet && snippet !== lastStdoutSnippet) {
+      lastStdoutSnippet = snippet;
+      sendLoadingStatus({
+        title: 'Starting Vibe Kanban server…',
+        detail: snippet
+      });
+    }
+  };
+
+  if (processRef.stdout) {
+    processRef.stdout.setEncoding('utf8');
+    processRef.stdout.on('data', (chunk) => handleOutput(chunk, 'stdout'));
+  }
+
+  if (processRef.stderr) {
+    processRef.stderr.setEncoding('utf8');
+    processRef.stderr.on('data', (chunk) => handleOutput(chunk, 'stderr'));
+  }
+
+  processRef.once('exit', (code, signal) => {
+    console.log(`Vibe Kanban process exited (code=${code}, signal=${signal})`);
+
+    if (serverProcess === processRef) {
+      serverProcess = null;
+    }
+
+    serverWasStartedByApp = false;
+
+    if (!startupComplete && loadingScreenActive) {
+      sendLoadingStatus({
+        title: 'Failed to start Vibe Kanban',
+        detail: 'Server stopped unexpectedly.',
+        subDetail: code !== null ? `Exit code: ${code}` : undefined,
+        state: 'error'
+      });
+    }
+  });
+
+  processRef.once('error', (error) => {
+    console.error('Server process error:', error);
+
+    if (serverProcess === processRef) {
+      serverProcess = null;
+    }
+
+    serverWasStartedByApp = false;
+
+    if (!startupComplete && loadingScreenActive) {
+      sendLoadingStatus({
+        title: 'Erreur lors du lancement de Vibe Kanban',
+        detail: error.message,
+        state: 'error'
+      });
+    }
+  });
+
+  try {
+    await waitForServer(45000);
+    startupComplete = true;
+
+    await sendLoadingStatus({
+      title: 'Server ready!',
+      detail: 'Loading Vibe Kanban…',
+      state: 'info'
     });
 
-    serverProcess.stderr.on('data', (data) => {
-      console.error(`Vibe Kanban Error: ${data}`);
-    });
-
-    serverProcess.on('error', (error) => {
-      console.error('Failed to start server with npx:', error.message);
-      serverWasStartedByApp = false;
-    });
-
-    // Attendre que le serveur démarre
-    await waitForServer(30000); // 30 secondes max
-    console.log('Server started successfully!');
-    console.log('serverWasStartedByApp set to:', serverWasStartedByApp);
     return true;
   } catch (error) {
     console.error('Error starting server:', error);
-    // Note: On ne bloque pas avec dialog.showErrorBox pour permettre à l'app de continuer
-    // L'utilisateur verra l'erreur de connexion dans la fenêtre
+
+    await sendLoadingStatus({
+      title: 'Unable to start Vibe Kanban',
+      detail: 'Server did not respond in time.',
+      subDetail: error.message,
+      state: 'error'
+    });
+
+    await stopServerProcess({ force: true });
+
     return false;
   }
 }
 
-async function waitForServer(timeout = 30000) {
+async function waitForServer(timeout = 45000) {
   const startTime = Date.now();
 
   while (Date.now() - startTime < timeout) {
@@ -168,8 +901,8 @@ async function waitForServer(timeout = 30000) {
   throw new Error('Server did not start within timeout period');
 }
 
-function createWindow() {
-  // Chercher l'icône (PNG ou SVG)
+async function createWindow() {
+  // Look for icon (PNG or SVG)
   let iconPath = null;
   const possibleIcons = [
     path.join(__dirname, 'build', 'icon.png'),
@@ -188,27 +921,27 @@ function createWindow() {
   const windowOptions = {
     width: 1400,
     height: 900,
-    backgroundColor: '#1a1a1a', // Couleur de fond sombre correspondant à Vibe Kanban
+    backgroundColor: '#1a1a1a', // Dark background matching Vibe Kanban
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
-      sandbox: true, // Active le sandbox pour plus de sécurité
+      sandbox: true, // Enable sandbox for better security
       allowRunningInsecureContent: false,
       experimentalFeatures: false
     },
     title: 'Vibe Kanban',
-    show: true, // Afficher immédiatement
-    center: true, // Centrer la fenêtre
+    show: true, // Show immediately
+    center: true, // Center the window
     alwaysOnTop: false,
     skipTaskbar: false
   };
 
-  // Ajouter l'icône si elle existe
+  // Add icon if it exists
   if (iconPath) {
     if (iconPath.endsWith('.svg')) {
-      // Pour SVG, on utilise nativeImage
+      // For SVG, use nativeImage
       windowOptions.icon = nativeImage.createFromPath(iconPath);
     } else {
       windowOptions.icon = iconPath;
@@ -217,29 +950,29 @@ function createWindow() {
 
   mainWindow = new BrowserWindow(windowOptions);
 
-  // Bloquer toute navigation externe (sécurité)
+  // Block all external navigation (security)
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const parsedUrl = new URL(url);
-    // Autoriser uniquement localhost
+    // Only allow localhost
     if (parsedUrl.hostname !== '127.0.0.1' && parsedUrl.hostname !== 'localhost') {
-      console.warn('Navigation bloquée vers:', url);
+      console.warn('Blocked navigation to:', url);
       event.preventDefault();
     }
   });
 
-  // Bloquer l'ouverture de nouvelles fenêtres (sécurité)
+  // Block opening new windows (security)
   mainWindow.webContents.setWindowOpenHandler(() => {
     return { action: 'deny' };
   });
 
-  // Définir une Content Security Policy stricte
+  // Set strict Content Security Policy
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self'; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " + // Nécessaire pour Vibe Kanban
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " + // Required for Vibe Kanban
           "style-src 'self' 'unsafe-inline'; " +
           "img-src 'self' data: blob:; " +
           "connect-src 'self' ws://127.0.0.1:* ws://localhost:*; " +
@@ -264,7 +997,7 @@ function createWindow() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.host;
             url = protocol + '//' + host + url;
-            console.log('[Electron] WebSocket URL corrigée:', url);
+            console.log('[Electron] WebSocket URL fixed:', url);
           }
 
           return new OriginalWebSocket(url, protocols);
@@ -280,47 +1013,45 @@ function createWindow() {
     `);
   });
 
-  // Afficher la fenêtre immédiatement pour éviter qu'elle reste cachée
-  mainWindow.show();
+  mainWindow.webContents.on('did-finish-load', () => {
+    const currentUrl = mainWindow.webContents.getURL();
+    if (isLoadingScreen(currentUrl)) {
+      loadingScreenReady = true;
+      flushPendingLoadingMessages();
+    } else {
+      deactivateLoadingScreen();
+      console.log('Page loaded successfully!');
+    }
+  });
 
-  // Sur macOS, activer l'application et mettre la fenêtre au premier plan
-  if (process.platform === 'darwin') {
-    app.dock.show();
-    mainWindow.focus();
-  }
-
-  // Charger l'URL du serveur Vibe Kanban
-  // Le gestionnaire did-fail-load gérera les reconnexions automatiques
-  mainWindow.loadURL(SERVER_URL);
-
-  // Ouvrir DevTools en développement uniquement (optionnel)
+  // Open DevTools in development only (optional)
   // mainWindow.webContents.openDevTools();
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 
-  // Gérer les erreurs de chargement - réessayer indéfiniment
+  // Handle loading errors - retry indefinitely
   mainWindow.webContents.on('did-fail-load', async (event, errorCode, errorDescription) => {
     console.error('Failed to load:', errorCode, errorDescription);
 
-    // Réessayer après 3 secondes
+    const currentUrl = mainWindow ? mainWindow.webContents.getURL() : '';
+    if (isLoadingScreen(currentUrl)) {
+      return;
+    }
+
+    // Retry after 3 seconds
     console.log('Retrying in 3 seconds...');
     setTimeout(() => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow && !mainWindow.isDestroyed() && !loadingScreenActive) {
         mainWindow.loadURL(SERVER_URL);
       }
     }, 3000);
   });
 
-  // Quand la page charge avec succès, reset le compteur
-  mainWindow.webContents.on('did-finish-load', () => {
-    console.log('Page loaded successfully!');
-  });
-
-  // Supprimer l'ancienne page d'erreur - on réessaie indéfiniment
+  // Remove old error page - retry indefinitely
   /*
-  if (false) {  // Code désactivé
+  if (false) {  // Code disabled
       mainWindow.loadURL(`data:text/html;charset=utf-8,
         <!DOCTYPE html>
         <html>
@@ -359,10 +1090,10 @@ function createWindow() {
         </head>
         <body>
           <div class="container">
-            <h1>Serveur Vibe Kanban non disponible</h1>
-            <p>Impossible de se connecter au serveur Vibe Kanban sur <code>${SERVER_URL}</code></p>
-            <p>Veuillez démarrer le serveur Vibe Kanban manuellement et cliquer sur le bouton ci-dessous.</p>
-            <button class="retry-btn" onclick="location.reload()">Réessayer</button>
+            <h1>Vibe Kanban Server Unavailable</h1>
+            <p>Unable to connect to Vibe Kanban server at <code>${SERVER_URL}</code></p>
+            <p>Please start the Vibe Kanban server manually and click the button below.</p>
+            <button class="retry-btn" onclick="location.reload()">Retry</button>
           </div>
         </body>
         </html>
@@ -370,13 +1101,27 @@ function createWindow() {
     }
   }
   */
+
+  await showLoadingScreen({
+    title: 'Initializing Vibe Kanban…',
+    detail: 'Preparing local server.'
+  });
+
+  // Show window immediately to prevent it from staying hidden
+  mainWindow.show();
+
+  // On macOS, activate the app and bring window to front
+  if (process.platform === 'darwin') {
+    app.dock.show();
+    mainWindow.focus();
+  }
 }
 
 app.whenReady().then(async () => {
-  // Créer le menu avec le bon nom d'application
+  // Create menu with proper app name
   createMenu();
 
-  // Définir l'icône de l'application pour le Dock (macOS)
+  // Set app icon for Dock (macOS)
   if (process.platform === 'darwin') {
     const iconPath = path.join(__dirname, 'build', 'icon.png');
     if (fs.existsSync(iconPath)) {
@@ -385,19 +1130,31 @@ app.whenReady().then(async () => {
     }
   }
 
-  // Ouvrir la fenêtre immédiatement
-  createWindow();
+  await createWindow();
 
-  // Démarrer le serveur en arrière-plan
-  startVibeKanbanServer().then(serverStarted => {
-    if (!serverStarted) {
-      console.log('Server failed to start, but window is already open');
-    }
-  });
+  const serverStarted = await startVibeKanbanServer();
+  if (serverStarted) {
+    await sendLoadingStatus({
+      title: 'Connecting to Vibe Kanban…',
+      detail: 'Loading interface.'
+    });
 
-  app.on('activate', () => {
+    await loadVibeKanbanUI();
+  } else {
+    console.log('Server failed to start, keeping loading screen visible');
+  }
+
+  app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      await createWindow();
+      const restarted = await startVibeKanbanServer();
+      if (restarted) {
+        await sendLoadingStatus({
+          title: 'Connecting to Vibe Kanban…',
+          detail: 'Loading interface.'
+        });
+        await loadVibeKanbanUI();
+      }
     }
   });
 });
@@ -406,30 +1163,30 @@ let isQuitting = false;
 let quitConfirmed = false;
 
 app.on('window-all-closed', () => {
-  // Sur macOS, quitter quand toutes les fenêtres sont fermées
-  // Le dialog de confirmation sera géré dans before-quit
+  // On macOS, quit when all windows are closed
+  // Confirmation dialog will be handled in before-quit
   app.quit();
 });
 
-app.on('before-quit', (event) => {
+app.on('before-quit', async (event) => {
   console.log('before-quit event fired');
   console.log('quitConfirmed:', quitConfirmed);
   console.log('serverWasStartedByApp:', serverWasStartedByApp);
   console.log('isQuitting:', isQuitting);
 
-  // Si déjà confirmé, laisser quitter
+  // If already confirmed, let it quit
   if (quitConfirmed) {
     console.log('Quit already confirmed, exiting');
     return;
   }
 
-  // Si on a démarré le serveur, demander confirmation
-  if (serverWasStartedByApp && !isQuitting) {
+  // If we started the server, ask for confirmation
+  if (serverWasStartedByApp && serverProcess && !isQuitting) {
     console.log('Preventing quit to show dialog');
     event.preventDefault();
     isQuitting = true;
 
-    // Créer une fenêtre temporaire invisible pour le dialog si nécessaire
+    // Create temporary invisible window for dialog if needed
     let dialogParent = null;
     if (!mainWindow || mainWindow.isDestroyed()) {
       dialogParent = new BrowserWindow({
@@ -441,53 +1198,59 @@ app.on('before-quit', (event) => {
       dialogParent = mainWindow;
     }
 
-    // Utiliser showMessageBoxSync pour une réponse synchrone
+    // Use showMessageBoxSync for synchronous response
     const response = dialog.showMessageBoxSync(dialogParent, {
       type: 'question',
-      buttons: ['Arrêter Kanban', 'Laisser tourner', 'Annuler'],
+      buttons: ['Stop Kanban', 'Keep Running', 'Cancel'],
       defaultId: 0,
-      title: 'Fermeture de Vibe Kanban',
-      message: 'Voulez-vous arrêter le serveur Vibe Kanban ?',
-      detail: 'Le serveur Vibe Kanban a été démarré par cette application. Voulez-vous l\'arrêter en fermant l\'application ?',
+      title: 'Closing Vibe Kanban',
+      message: 'Do you want to stop the Vibe Kanban server?',
+      detail: 'The Vibe Kanban server was started by this application. Do you want to stop it when closing the app?',
       cancelId: 2,
       noLink: true
     });
 
-    // Fermer la fenêtre temporaire si on en a créé une
+    // Close temporary window if we created one
     if (dialogParent !== mainWindow && !dialogParent.isDestroyed()) {
       dialogParent.destroy();
     }
 
     if (response === 0) {
-      // Arrêter le serveur
+      // Stop the server
       console.log('Stopping Vibe Kanban server...');
-      if (serverProcess && !serverProcess.killed) {
-        serverProcess.kill('SIGTERM');
+      try {
+        await stopServerProcess({ force: false });
+      } catch (error) {
+        console.error('Failed to stop server cleanly:', error);
       }
-      serverProcess = null;
+
       quitConfirmed = true;
       isQuitting = false;
       app.quit();
+      return;
     } else if (response === 1) {
-      // Laisser le serveur tourner
+      // Keep server running
       console.log('Leaving Vibe Kanban server running...');
       serverProcess = null;
+      serverWasStartedByApp = false;
       quitConfirmed = true;
       isQuitting = false;
       app.quit();
+      return;
     } else {
-      // Annuler
+      // Cancel
       console.log('User cancelled quit');
       isQuitting = false;
+      return;
     }
   } else if (!serverWasStartedByApp && serverProcess) {
-    // Si on n'a pas démarré le serveur, juste se détacher
+    // If we didn't start the server, just detach
     console.log('Detaching from Vibe Kanban server...');
     serverProcess = null;
   }
 });
 
-// Gérer les crashes
+// Handle crashes
 process.on('uncaughtException', (error) => {
   console.error('Uncaught exception:', error);
 });

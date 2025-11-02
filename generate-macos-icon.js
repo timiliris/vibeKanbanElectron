@@ -8,7 +8,7 @@ const pngPath = path.join(__dirname, 'assets', 'Logo_Vibe_kanban2.png');
 const buildDir = path.join(__dirname, 'build');
 const iconPngPath = path.join(buildDir, 'icon.png');
 
-// Créer le dossier build s'il n'existe pas
+// Create build folder if it doesn't exist
 if (!fs.existsSync(buildDir)) {
   fs.mkdirSync(buildDir, { recursive: true });
 }
@@ -17,27 +17,27 @@ async function generateMacOSIcon() {
   console.log('Creating optimized macOS icon from Vibe Kanban logo...');
 
   try {
-    // Utiliser le SVG ou le PNG selon ce qui est disponible
+    // Use SVG or PNG depending on what's available
     let sourceFile = fs.existsSync(pngPath) ? pngPath : svgPath;
 
-    // Lire l'image originale
+    // Read the original image
     const image = sharp(sourceFile);
     const metadata = await image.metadata();
 
     console.log(`Original image size: ${metadata.width}x${metadata.height}`);
 
-    // Créer une icône carrée avec fond de la couleur du logo (macOS appliquera les coins arrondis)
-    // On garde juste les lettres VK centrées sur un fond #32322E
+    // Create square icon with logo background color (macOS will apply rounded corners)
+    // Keep just VK letters centered on #32322E background
     const iconSize = 1024;
-    const logoSize = 700; // Taille des lettres VK
+    const logoSize = 700; // Size of VK letters
 
-    // Créer un carré avec la couleur du logo de 1024x1024
+    // Create square with logo color 1024x1024
     await sharp({
       create: {
         width: iconSize,
         height: iconSize,
         channels: 4,
-        background: { r: 50, g: 50, b: 46, alpha: 1 } // Couleur #32322E
+        background: { r: 50, g: 50, b: 46, alpha: 1 } // Color #32322E
       }
     })
     .composite([
@@ -48,7 +48,7 @@ async function generateMacOSIcon() {
             kernel: sharp.kernel.lanczos3
           })
           .toBuffer(),
-        gravity: 'center' // Centrer le logo
+        gravity: 'center' // Center the logo
       }
     ])
     .png()
@@ -56,7 +56,7 @@ async function generateMacOSIcon() {
 
     console.log('✓ Optimized icon created: build/icon.png');
 
-    // Pour macOS: créer ICNS
+    // For macOS: create ICNS
     if (process.platform === 'darwin') {
       console.log('\nGenerating macOS icon (ICNS)...');
       const iconsetDir = path.join(buildDir, 'icon.iconset');
@@ -65,7 +65,7 @@ async function generateMacOSIcon() {
         fs.mkdirSync(iconsetDir);
       }
 
-      // Générer toutes les tailles nécessaires pour macOS
+      // Generate all necessary sizes for macOS
       const sizes = [16, 32, 64, 128, 256, 512, 1024];
 
       for (const size of sizes) {
@@ -78,7 +78,7 @@ async function generateMacOSIcon() {
           })
           .toFile(outputFile);
 
-        // Créer aussi les versions @2x
+        // Also create @2x versions
         if (size <= 512) {
           const size2x = size * 2;
           const outputFile2x = path.join(iconsetDir, `icon_${size}x${size}@2x.png`);
@@ -92,17 +92,17 @@ async function generateMacOSIcon() {
         }
       }
 
-      // Convertir l'iconset en ICNS
+      // Convert iconset to ICNS
       const icnsPath = path.join(buildDir, 'icon.icns');
       execSync(`iconutil -c icns "${iconsetDir}" -o "${icnsPath}"`, { stdio: 'inherit' });
 
-      // Nettoyer le dossier temporaire
+      // Clean up temporary folder
       execSync(`rm -rf "${iconsetDir}"`);
 
       console.log('✓ ICNS created: build/icon.icns');
     }
 
-    // Pour Windows: créer ICO
+    // For Windows: create ICO
     console.log('\nGenerating Windows icon (ICO)...');
 
     try {

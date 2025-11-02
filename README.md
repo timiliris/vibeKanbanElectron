@@ -18,6 +18,12 @@ Desktop application wrapper for [Vibe Kanban](https://github.com/vibekanban/vibe
   npm install -g vibe-kanban
   ```
 
+> **⚠️ Important**: If the Vibe Kanban window doesn't open or displays a blank screen, you may need to start Vibe Kanban manually first:
+> ```bash
+> npx vibe-kanban start
+> ```
+> Then launch the Electron app. This ensures the server is running before the app tries to connect.
+
 ## Installation
 
 ```bash
