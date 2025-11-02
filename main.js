@@ -104,55 +104,42 @@ async function startVibeKanbanServer() {
   serverWasStartedByApp = true; // On démarre le serveur nous-mêmes
 
   try {
-    // Tente de démarrer le serveur avec différentes commandes possibles
-    const commands = [
-      { cmd: 'vibe', args: ['start'] },
-      { cmd: 'vibe-kanban', args: ['start'] },
-      { cmd: 'npx', args: ['vibe-kanban', 'start'] }
-    ];
+    // Démarrer le serveur avec npx vibe-kanban
+    console.log('Starting Vibe Kanban with npx...');
 
-    for (const { cmd, args } of commands) {
-      try {
-        // Filtrer les variables d'environnement pour ne passer que celles nécessaires
-        const safeEnv = {
-          HOME: process.env.HOME,
-          PATH: process.env.PATH,
-          USER: process.env.USER,
-          LANG: process.env.LANG,
-          PORT: SERVER_PORT.toString()
-        };
+    // Filtrer les variables d'environnement pour ne passer que celles nécessaires
+    const safeEnv = {
+      HOME: process.env.HOME,
+      PATH: process.env.PATH,
+      USER: process.env.USER,
+      LANG: process.env.LANG,
+      PORT: SERVER_PORT.toString()
+    };
 
-        serverProcess = spawn(cmd, args, {
-          detached: false,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: safeEnv
-        });
+    serverProcess = spawn('npx', ['vibe-kanban', 'start'], {
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: safeEnv
+    });
 
-        serverProcess.stdout.on('data', (data) => {
-          console.log(`Vibe Kanban: ${data}`);
-        });
+    serverProcess.stdout.on('data', (data) => {
+      console.log(`Vibe Kanban: ${data}`);
+    });
 
-        serverProcess.stderr.on('data', (data) => {
-          console.error(`Vibe Kanban Error: ${data}`);
-        });
+    serverProcess.stderr.on('data', (data) => {
+      console.error(`Vibe Kanban Error: ${data}`);
+    });
 
-        serverProcess.on('error', (error) => {
-          console.error(`Failed to start server with ${cmd}:`, error.message);
-        });
+    serverProcess.on('error', (error) => {
+      console.error('Failed to start server with npx:', error.message);
+      serverWasStartedByApp = false;
+    });
 
-        // Attendre que le serveur démarre
-        await waitForServer(30000); // 30 secondes max
-        console.log('Server started successfully!');
-        console.log('serverWasStartedByApp set to:', serverWasStartedByApp);
-        return true;
-      } catch (err) {
-        console.log(`Command ${cmd} failed, trying next...`);
-        continue;
-      }
-    }
-
-    console.log('Could not start Vibe Kanban server with any command');
-    return false;
+    // Attendre que le serveur démarre
+    await waitForServer(30000); // 30 secondes max
+    console.log('Server started successfully!');
+    console.log('serverWasStartedByApp set to:', serverWasStartedByApp);
+    return true;
   } catch (error) {
     console.error('Error starting server:', error);
     // Note: On ne bloque pas avec dialog.showErrorBox pour permettre à l'app de continuer
