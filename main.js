@@ -412,17 +412,26 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async (event) => {
+  console.log('before-quit event fired');
+  console.log('quitConfirmed:', quitConfirmed);
+  console.log('serverWasStartedByApp:', serverWasStartedByApp);
+  console.log('serverProcess exists:', !!serverProcess);
+  console.log('serverProcess.killed:', serverProcess ? serverProcess.killed : 'N/A');
+  console.log('isQuitting:', isQuitting);
+
   // Si déjà confirmé, laisser quitter
   if (quitConfirmed) {
+    console.log('Quit already confirmed, exiting');
     return;
   }
 
   // Si on a démarré le serveur nous-mêmes, demander à l'utilisateur
   if (serverWasStartedByApp && serverProcess && !serverProcess.killed && !isQuitting) {
+    console.log('Showing quit confirmation dialog');
     event.preventDefault(); // Empêcher la fermeture immédiate
     isQuitting = true;
 
-    const { response } = await dialog.showMessageBox({
+    const { response } = await dialog.showMessageBox(mainWindow && !mainWindow.isDestroyed() ? mainWindow : null, {
       type: 'question',
       buttons: ['Arrêter Kanban', 'Laisser tourner', 'Annuler'],
       defaultId: 0,
