@@ -296,8 +296,71 @@ function createWindow() {
     mainWindow.focus();
   }
 
-  // Charger l'URL du serveur Vibe Kanban
-  mainWindow.loadURL(SERVER_URL);
+  // Afficher une page de chargement pendant que le serveur démarre
+  mainWindow.loadURL(`data:text/html;charset=utf-8,
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        body {
+          background: #1a1a1a;
+          color: #ffffff;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          margin: 0;
+        }
+        .loader {
+          text-align: center;
+        }
+        .spinner {
+          border: 4px solid #333;
+          border-top: 4px solid #4CAF50;
+          border-radius: 50%;
+          width: 50px;
+          height: 50px;
+          animation: spin 1s linear infinite;
+          margin: 0 auto 20px;
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        h2 { margin: 10px 0; color: #4CAF50; }
+        p { color: #999; }
+      </style>
+    </head>
+    <body>
+      <div class="loader">
+        <div class="spinner"></div>
+        <h2>Démarrage de Vibe Kanban</h2>
+        <p>Veuillez patienter...</p>
+      </div>
+      <script>
+        // Essayer de charger le serveur toutes les 2 secondes
+        let attempts = 0;
+        const maxAttempts = 30;
+        const checkServer = setInterval(() => {
+          attempts++;
+          fetch('${SERVER_URL}')
+            .then(() => {
+              clearInterval(checkServer);
+              window.location.href = '${SERVER_URL}';
+            })
+            .catch(() => {
+              if (attempts >= maxAttempts) {
+                clearInterval(checkServer);
+                document.body.innerHTML = '<div class="loader"><h2 style="color: #ff6b6b;">Erreur de connexion</h2><p>Le serveur Vibe Kanban n\\'a pas pu démarrer.</p></div>';
+              }
+            });
+        }, 2000);
+      </script>
+    </body>
+    </html>
+  `);
 
   // Ouvrir DevTools en développement uniquement (optionnel)
   // mainWindow.webContents.openDevTools();
