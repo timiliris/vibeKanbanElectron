@@ -143,6 +143,7 @@ async function startVibeKanbanServer() {
         // Attendre que le serveur démarre
         await waitForServer(30000); // 30 secondes max
         console.log('Server started successfully!');
+        console.log('serverWasStartedByApp set to:', serverWasStartedByApp);
         return true;
       } catch (err) {
         console.log(`Command ${cmd} failed, trying next...`);
